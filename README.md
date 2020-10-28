@@ -1,6 +1,9 @@
 # Microbial-graph project  
 ## Process data from .biom to tsv  
-ref: [emp repo](https://github.com/biocore/emp/tree/master/code/08-cooccurrence-nestedness/cooccurrence-network)  
+ref:  
+[emp repo](https://github.com/biocore/emp)  
+[emp repo_cooccurence](https://github.com/biocore/emp/tree/master/code/08-cooccurrence-nestedness/cooccurrence-network)  
+[emp_sample metadata](https://github.com/biocore/emp/blob/master/data/mapping-files/emp_qiime_mapping_subset_2k.tsv)  
 1. Install ruby (the emp repo use ruby to convert .biom to tsv)  
 2. Run "run.sh" under [1_dataProcessing/bioTocsv](https://github.com/SzuHannah/Microbial-graph/tree/main/1_dataProcessing/biomTotsv)  
 - To run "run.sh", directly type ./run.sh in the terminal   
