@@ -1,0 +1,114 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+#read file and libraries
+infile = "otu_sample_value.txt"
+library("Matrix")  # sparseMatrix()
+d = read.table(infile, header=T, sep="\t", colClasses=c(rep("character", 2), "numeric"))
+otus = read.table("row_metadata.txt", header=T, sep="\t", colClasses=rep("character", 9))
+samples = read.table("column_metadata.txt", header=T, sep="\t", colClasses=rep("character", 2))
+
+# extract row / column indices
+I = as.integer(gsub("otu_", "", d$OTU)) + 1        # add 1 to convert 0-index to 1-index
+J = as.integer(gsub("sample_", "", d$SAMPLE)) + 1  # add 1 to convert 0-index to 1-index
+```
+
+```{r}
+# sparse bipartitie OTU-sample adjacency matrix (w/o filtering)
+A = sparseMatrix(i=I, j=J, x=d$VALUE)
+rownames(A) = otus$ID
+colnames(A) = samples$ID
+dim(A)
+##here, just want to see if there's a difference aftering taking sqrt transformation
+#take sqrt transformation(stablization)
+A.sqrt=A
+A.sqrt@x=sqrt(A.sqrt@x)
+plot(A@x)
+plot(A.sqrt@x)
+
+#plot out-degree to examine
+hist(log10(rowSums(A)))#highly skewed, some microbiomes are more abundant than others
+```
+
+```{r, message=FALSE}
+#do vsp on A (the adjacency matrix), not very useful lol, just a trial
+library(vsp)
+# fa_A<-vsp(A, k=50)
+# plot_varimax_z_pairs(fa_A,1:10)#row(otu)
+# plot_varimax_y_pairs(fa_A,1:10)#colum(sample)
+# screeplot(fa_A)
+```
+
+```{r}
+#Adjacency matrix with 1, 0 entries(the row sum can be useful for subsetting the sample)
+#but I think using the original adjacency matrix(A) to do analysis is more informative
+#because the absolute vaule of otus in each sample is related with beta diversity
+#sample with similar beta diversity should be grouped together
+A.simple=(A > 0) * 1
+
+#pick a managable number of OTUs to manipulate the OTU co-occurrence network
+#Pick OTUs that belong to a few prominent phyla
+selected.otus = rbind(
+  subset(otus, otus$PHYLUM == "p__Proteobacteria", ID),
+  subset(otus, otus$PHYLUM == "p__Bacteroidetes", ID),
+  subset(otus, otus$PHYLUM == "p__Firmicutes", ID)
+)
+
+#index for prominent phyla
+idx.phy = as.numeric(row.names(selected.otus))
+##subset the true-val Adjacency matrix (A->A.sel)
+A.sel=A[idx.phy,]
+##subset the simple Adjacency matrix(A.simple)
+A.simple=A.simple[idx.phy,]
+
+#index of OTUs with prevalence of at least 10 samples(use the rowSum of A.simple to pick)
+#since A.simple records 1 in Aij if otui appears in sample j; 0 otherwise
+idx.prv = rowSums(A.simple) > 9
+##continue to subset the true-val Adjacency matrix
+A.sel=A.sel[idx.prv,]
+##continue to subset the simple Adjacency matrix(because the rowSum of this matrix might be useful later), and I want to make sure the dimension matches the true-val Adj matrix
+A.simple=A.simple[idx.prv,]
+
+#Order matrix rows by prevalence, high to low
+o = order(rowSums(A.simple), decreasing=T)
+A.simple = A.simple[o,]
+prevalence = rowSums(A.simple)  # handy to use this later
+
+#look at A.sel
+A.sel[1:10,1:10]
+```
+
+```{r}
+#take square root transformation on A.sel (the adjmatrix of interest)
+A.sel@x=sqrt(A.sel@x)
+#look at A.sel again
+A.sel[1:10,1:10]
+```
+## Do vsp on data of interest, matrix: A.sel(an adjacency matrix, row: otu; col: sample)  
+```{r,message=FALSE}
+#do vsp on A.sel 
+fa_A.sel<-vsp(A.sel, k=30)
+plot_varimax_z_pairs(fa_A.sel,1:10)#row(otu)
+plot_varimax_y_pairs(fa_A.sel,1:10)#colum(sample)
+screeplot(fa_A.sel)
+```
+## Characterize sample's clusters (i.e. examine what kind of environments may have similar microbiome community pattern)
+```{r, message=FALSE}
+library(dplyr)
+library(tidytext)
+#read in sample metadata
+#76 col
+sample_meta = read.table("sample_metadata_detail.txt", header=T, sep="\t", colClasses=rep("character", 76))
+sample_meta_ofInterest=sample_meta%>%select(X.SampleID,env_feature)%>%rename(SAMPLE=X.SampleID)
+sample_meta_ID=samples%>%left_join(sample_meta_ofInterest)%>%select(-SAMPLE)%>%mutate(ID=(0:1999))
+sample_meta_mtx=cast_sparse(sample_meta_ID,ID,env_feature)
+dim(sample_meta_mtx)
+#characterize 
+feature= bff(fa_A.sel$Y, sample_meta_mtx,10)
+feature
+```
+
