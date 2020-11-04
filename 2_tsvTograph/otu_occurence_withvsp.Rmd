@@ -37,10 +37,10 @@ hist(log10(rowSums(A)))#highly skewed, some microbiomes are more abundant than o
 ```{r, message=FALSE}
 #do vsp on A (the adjacency matrix), not very useful lol, just a trial
 library(vsp)
-# fa_A<-vsp(A, k=50)
-# plot_varimax_z_pairs(fa_A,1:10)#row(otu)
-# plot_varimax_y_pairs(fa_A,1:10)#colum(sample)
-# screeplot(fa_A)
+fa_A<-vsp(A, k=50)
+plot_varimax_z_pairs(fa_A,1:10)#row(otu)
+plot_varimax_y_pairs(fa_A,1:10)#colum(sample)
+screeplot(fa_A)
 ```
 
 ```{r}
@@ -80,6 +80,8 @@ prevalence = rowSums(A.simple)  # handy to use this later
 
 #look at A.sel
 A.sel[1:10,1:10]
+dim(A.sel)
+
 ```
 
 ```{r}
@@ -91,11 +93,64 @@ A.sel[1:10,1:10]
 ## Do vsp on data of interest, matrix: A.sel(an adjacency matrix, row: otu; col: sample)  
 ```{r,message=FALSE}
 #do vsp on A.sel 
-fa_A.sel<-vsp(A.sel, k=30)
+fa_A.sel<-vsp(A.sel, rank=10)
+#fa_A.sel<-vsp(A.sel, rank=30, center = TRUE)
+#see the top 10 in each flocak
+apply(fa_A.sel$Y,2, function(x) samples$SAMPLE[order(-x)[1:100]])
 plot_varimax_z_pairs(fa_A.sel,1:10)#row(otu)
 plot_varimax_y_pairs(fa_A.sel,1:10)#colum(sample)
 screeplot(fa_A.sel)
+dim(fa_A.sel$Z)#otu loadings in each flock, a column is a flock.
+dim(fa_A.sel$Y)#sample loadings in each flock, a column is a flock.
+
+colSums(fa_A.sel$v^2)#about sample, v is orthonormal, colSums=1
+colSums(fa_A.sel$u^2)#about otu, u is orthonormal, colSums=1
+hist(log10(fa_A.sel$u^2))
+hist(log10(fa_A.sel$u[,1]^2))#(estimating log probability distribution of otus within the 1st topic?)
+sum(fa_A.sel$v[1,]^2)
+hist(log10(fa_A.sel$v^2))#(log probability distribution of samples within each of the k topics?)
 ```
+
+## plot sample-flock, and encode with empo_3
+```{r, message=FALSE}
+library(ggplot2)
+#ggallery ref: https://www.r-graph-gallery.com/199-correlation-matrix-with-ggally.html
+sample_flocklaoad<-fa_A.sel$Y
+rownames(sample_flocklaoad)<-samples$SAMPLE
+apply(sample_flocklaoad,2, function(x) samples$SAMPLE[order(-x)[1:100]])%>%View
+sample_flocklaoad
+fa_A.sel$Y
+sample_meta_ofInterest=sample_meta%>%select(X.SampleID,empo_3)%>%rename(SAMPLE=X.SampleID)
+#plot varimax y pairs with empo encoding
+fa_A.sel%>%
+  get_varimax_y(1:5)%>%
+  select(-id) %>%
+  mutate(leverage = purrr::pmap_dbl(., sum))%>%
+  mutate(SAMPLE=samples$SAMPLE)%>%
+  left_join(sample_meta_ofInterest)%>%
+  #there's not so much to sample if only use a few factors to plot, eg. no need to sample when we use less than 5 factors to plot
+  #sample_n(min(nrow(.), 1000), weight = leverage^2)%>%
+  #select(-leverage,-SAMPLE)%>%
+  #select(-SAMPLE)%>%
+  GGally::ggpairs(columns=1:5,ggplot2::aes(colour=empo_3),cardinality_threshold = 17) +
+  theme_minimal()
+
+fa_A.sel%>%
+  get_varimax_y(6:10)%>%
+  select(-id) %>%
+  mutate(leverage = purrr::pmap_dbl(., sum))%>%
+  mutate(SAMPLE=samples$SAMPLE)%>%
+  left_join(sample_meta_ofInterest)%>%
+  #there's not so much to sample if only use a few factors to plot, eg. no need to sample when we use less than 5 factors to plot
+  #sample_n(min(nrow(.), 1000), weight = leverage^2)%>%
+  #select(-leverage,-SAMPLE)%>%
+  #select(-SAMPLE)%>%
+  GGally::ggpairs(columns=1:5,ggplot2::aes(colour=empo_3),cardinality_threshold = 17) +
+  theme_minimal()
+
+```
+
+
 ## Characterize sample's clusters (i.e. examine what kind of environments may have similar microbiome community pattern)
 ```{r, message=FALSE}
 library(dplyr)
@@ -104,11 +159,19 @@ library(tidytext)
 #76 col
 sample_meta = read.table("sample_metadata_detail.txt", header=T, sep="\t", colClasses=rep("character", 76))
 sample_meta_ofInterest=sample_meta%>%select(X.SampleID,env_feature)%>%rename(SAMPLE=X.SampleID)
+#sample_meta_ofInterest=sample_meta%>%select(X.SampleID,empo_3)%>%rename(SAMPLE=X.SampleID)
 sample_meta_ID=samples%>%left_join(sample_meta_ofInterest)%>%select(-SAMPLE)%>%mutate(ID=(0:1999))
 sample_meta_mtx=cast_sparse(sample_meta_ID,ID,env_feature)
+
+#unnest the feature words into feature word tokens
+#meta_tt=sample_meta_ID%>%unnest_tokens(env_featkey,env_feature)
+#meta_tt_mtx=cast_sparse(meta_tt,ID,env_featkey)
+#sample_meta_mtx=cast_sparse(sample_meta_ID,ID,empo_3)
+
 dim(sample_meta_mtx)
 #characterize 
-feature= bff(fa_A.sel$Y, sample_meta_mtx,10)
+feature= bff(fa_A.sel$Y, sample_meta_mtx,20)
+#feature= bff(fa_A.sel$Y, meta_tt_mtx,10)
 feature
 ```
 
