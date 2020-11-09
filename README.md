@@ -1,4 +1,7 @@
 # Microbial-graph project  
+## Draft for blogpost 
+[goolge doc link](https://docs.google.com/document/d/16YL4hZdoKpR3T1TXYm4Wz2-qHcmJqwhHWDuzH0j7B7k/edit?usp=sharing)  
+
 ## Useful links  
 ref:  
 [emp repo](https://github.com/biocore/emp)  
