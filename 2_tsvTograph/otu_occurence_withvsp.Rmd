@@ -11,7 +11,7 @@ library("Matrix")  # sparseMatrix()
 d = read.table(infile, header=T, sep="\t", colClasses=c(rep("character", 2), "numeric"))
 otus = read.table("row_metadata.txt", header=T, sep="\t", colClasses=rep("character", 9))
 samples = read.table("column_metadata.txt", header=T, sep="\t", colClasses=rep("character", 2))
-
+colnames(sample_meta)
 # extract row / column indices
 I = as.integer(gsub("otu_", "", d$OTU)) + 1        # add 1 to convert 0-index to 1-index
 J = as.integer(gsub("sample_", "", d$SAMPLE)) + 1  # add 1 to convert 0-index to 1-index
@@ -44,6 +44,7 @@ screeplot(fa_A)
 ```
 
 ```{r}
+library(dplyr)
 #Adjacency matrix with 1, 0 entries(the row sum can be useful for subsetting the sample)
 #but I think using the original adjacency matrix(A) to do analysis is more informative
 #because the absolute vaule of otus in each sample is related with beta diversity
@@ -51,6 +52,12 @@ screeplot(fa_A)
 A.simple=(A > 0) * 1
 
 #pick a managable number of OTUs to manipulate the OTU co-occurrence network
+otuByPhylum<-otus%>%
+  group_by(PHYLUM)%>%
+  summarize(count=n())%>%
+  mutate(percent=(count/sum(count))*100)%>%
+  arrange(-count)
+
 #Pick OTUs that belong to a few prominent phyla
 selected.otus = rbind(
   subset(otus, otus$PHYLUM == "p__Proteobacteria", ID),
@@ -69,10 +76,11 @@ A.simple=A.simple[idx.phy,]
 #since A.simple records 1 in Aij if otui appears in sample j; 0 otherwise
 idx.prv = rowSums(A.simple) > 9
 ##continue to subset the true-val Adjacency matrix
-A.sel=A.sel[idx.prv,]
+#A.sel=A.sel[idx.prv,]
+A.sel=A[idx.prv,]#try only subset for prevalence, use all phylum
 ##continue to subset the simple Adjacency matrix(because the rowSum of this matrix might be useful later), and I want to make sure the dimension matches the true-val Adj matrix
+#A.simple=A.simple[idx.prv,]
 A.simple=A.simple[idx.prv,]
-
 #Order matrix rows by prevalence, high to low
 o = order(rowSums(A.simple), decreasing=T)
 A.simple = A.simple[o,]
@@ -80,8 +88,33 @@ prevalence = rowSums(A.simple)  # handy to use this later
 
 #look at A.sel
 A.sel[1:10,1:10]
-dim(A.sel)
-
+dim(A.sel)#8263*2000, n*d, with subset #18407*2000, n*d, without subset
+n=nrow(A.sel)
+d=ncol(A.sel)
+In<-as.matrix(c(rep(1,n)))
+Id<-as.matrix(c(rep(1,d)))
+length(A.sel@x)
+A.sel_center<-A.sel
+entries_len<-length(A.sel_center@x)
+A.sel_center@x<-A.sel_center@x-(In%*%(t(In)%*%A.sel/n))[1:entries_len]
+#fa_center<-vsp(A.sel_center,rank = 10,center=FALSE) #this works too
+fa_center<-vsp(A.sel,rank = 20,center = TRUE,scale = TRUE,rescale = TRUE,recenter = FALSE)
+phi=t(fa_center$Z)%*%A.sel_center
+dim(phi)#20*2000
+phi@x
+library(wordspace)
+norm_phi=rowNorms(phi,method="minkowski",p=1)#calculate l1 norm for each row
+norm_phi_d<-diag(norm_phi) #20*20 diagonal matrix
+norm_phi_d_inv<-solve(norm_phi_d) #inverse of norm_phi_d
+beta<-t(norm_phi_d_inv%*%phi) #2000*20
+beta[beta<0]=0
+beta<-apply(beta,2,function(x) return(x/sum(x)))
+#beta@x<-abs(beta@x) #take absolute value? nahhh, this is one way, but usually what we do is make the negative values = 0, and calculate x/sum(x), 'cause by assumption, we don't have negative betas, so, if we get negatvie ones, we'll just say it's statistical error
+colSums(beta)#each column sum up to 1
+beta
+hist(log10(beta))
+#how samples compose each community
+community_composition<-data.frame(beta)%>%mutate(ID=(0:1999))
 ```
 
 ```{r}
@@ -93,12 +126,13 @@ A.sel[1:10,1:10]
 ## Do vsp on data of interest, matrix: A.sel(an adjacency matrix, row: otu; col: sample)  
 ```{r,message=FALSE}
 #do vsp on A.sel 
-fa_A.sel<-vsp(A.sel, rank=10)
+fa_A.sel<-vsp(A.sel, rank=20)
 #fa_A.sel<-vsp(A.sel, rank=30, center = TRUE)
 #see the top 10 in each flocak
 apply(fa_A.sel$Y,2, function(x) samples$SAMPLE[order(-x)[1:100]])
 plot_varimax_z_pairs(fa_A.sel,1:10)#row(otu)
 plot_varimax_y_pairs(fa_A.sel,1:10)#colum(sample)
+vsp_fa(fa_A.sel)
 screeplot(fa_A.sel)
 dim(fa_A.sel$Z)#otu loadings in each flock, a column is a flock.
 dim(fa_A.sel$Y)#sample loadings in each flock, a column is a flock.
@@ -106,9 +140,9 @@ dim(fa_A.sel$Y)#sample loadings in each flock, a column is a flock.
 colSums(fa_A.sel$v^2)#about sample, v is orthonormal, colSums=1
 colSums(fa_A.sel$u^2)#about otu, u is orthonormal, colSums=1
 hist(log10(fa_A.sel$u^2))
-hist(log10(fa_A.sel$u[,1]^2))#(estimating log probability distribution of otus within the 1st topic?)
+hist(log10(fa_A.sel$u[,1]^2))#(estimating log probability distribution of otus within the 1st topic?, nope, you'll need to calculate naively to estimate the betas in LDA)
 sum(fa_A.sel$v[1,]^2)
-hist(log10(fa_A.sel$v^2))#(log probability distribution of samples within each of the k topics?)
+hist(log10(fa_A.sel$v^2))
 ```
 
 ## plot sample-flock, and encode with empo_3
@@ -158,20 +192,52 @@ library(tidytext)
 #read in sample metadata
 #76 col
 sample_meta = read.table("sample_metadata_detail.txt", header=T, sep="\t", colClasses=rep("character", 76))
-sample_meta_ofInterest=sample_meta%>%select(X.SampleID,env_feature)%>%rename(SAMPLE=X.SampleID)
+#sample_meta_ofInterest=sample_meta%>%select(X.SampleID,env_feature)%>%rename(SAMPLE=X.SampleID)
+sample_meta_ofInterest=sample_meta%>%select(X.SampleID,env_biome)%>%rename(SAMPLE=X.SampleID)
 #sample_meta_ofInterest=sample_meta%>%select(X.SampleID,empo_3)%>%rename(SAMPLE=X.SampleID)
 sample_meta_ID=samples%>%left_join(sample_meta_ofInterest)%>%select(-SAMPLE)%>%mutate(ID=(0:1999))
-sample_meta_mtx=cast_sparse(sample_meta_ID,ID,env_feature)
+#sample_meta_mtx=cast_sparse(sample_meta_ID,ID,env_feature)
 
 #unnest the feature words into feature word tokens
 #meta_tt=sample_meta_ID%>%unnest_tokens(env_featkey,env_feature)
-#meta_tt_mtx=cast_sparse(meta_tt,ID,env_featkey)
+meta_tt=sample_meta_ID%>%unnest_tokens(env_featkey,env_biome)
+meta_tt_mtx=cast_sparse(meta_tt,ID,env_featkey)
 #sample_meta_mtx=cast_sparse(sample_meta_ID,ID,empo_3)
 
 dim(sample_meta_mtx)
 #characterize 
-feature= bff(fa_A.sel$Y, sample_meta_mtx,20)
-#feature= bff(fa_A.sel$Y, meta_tt_mtx,10)
+#feature= bff(fa_A.sel$Y, sample_meta_mtx,20)
+feature= bff(fa_A.sel$Y, meta_tt_mtx,10)
 feature
+```
+```{r}
+#left-join sample composition with feature of interest
+community_composition_bybiome<-sample_meta_ID%>%
+  left_join(community_composition)%>%
+  select(-ID)%>%
+  group_by(env_biome)%>%
+  summarize_each(funs(sum))
+
+library(tidyr)
+library(ggplot2)
+community_composition_bybiome
+library(tidyverse)
+stopwords="biome"
+
+community_composit_tidy<-community_composition_bybiome%>%
+  pivot_longer(!env_biome,names_to="cluster",values_to="ratio")%>%
+  mutate(ratio=100*ratio)%>%
+  mutate(env_biome=str_remove_all(env_biome,"biome"))%>%
+  mutate(cluster=factor(cluster,levels=paste0("X",c(1:20))))
+
+#ggplot(data=community_composit_tidy, aes(x=cluster, y=ratio, fill=env_biome)) +
+#  geom_bar(stat="identity")
+
+p<-ggplot(community_composit_tidy[which(community_composit_tidy$ratio>3),], aes(x=env_biome,y=ratio)) +
+  geom_col() +
+  facet_wrap( ~ cluster, scales="free",ncol=5) +
+  theme_bw()+
+  aes(stringr::str_wrap(env_biome, 5), ratio)+xlab("biome type")
+p
 ```
 
