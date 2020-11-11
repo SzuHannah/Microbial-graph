@@ -1,6 +1,17 @@
-## Welcome to Vintage Sparse PCA (vsp) with Microbiome Data
+---
+#
+# Here you can change the text shown in the Home page before the Latest Posts section.
+#
+# Edit cayman-blog's home layout in _layouts instead if you wanna make some changes
+# See: https://jekyllrb.com/docs/themes/#overriding-theme-defaults
+#
+layout: home
+---
 
-This is an ongoing project that uses Vintage Sparse PCA (vsp) to give some insights into microbiome data.  
- 
-Please see here for the most recent blog post that illustrates how we did vsp on a microbiome dataset from the Earth Microbiome Project.  
+Cayman Blog Theme is a clean, responsive blogging theme for Jekyll. It is inspired by the Cayman Theme for Github Pages, which can be greatly used for single projects but not as blogging platform.
 
+This theme has instead all you need to start today blogging with Jekyll, and no effort: pages, posts, few social buttons. Try loading this on mobile too.
+
+Have a look at the Github page for more information.
+
+You find this descriptive text in the `index.md` file, so you can change it, or remove it completely, according to your needs.
