@@ -118,9 +118,11 @@ library(ggplot2)
 library(dplyr)
 #ggallery ref: https://www.r-graph-gallery.com/199-correlation-matrix-with-ggally.html
 sample_meta = read.table("sample_metadata_detail.txt", header=T, sep="\t", colClasses=rep("character", 76))
-sample_flocklaoad<-fa_A.sel$Y
+#sample_flocklaoad<-fa_A.sel$Y
+sample_flocklaoad<-fa_center$Y
 rownames(sample_flocklaoad)<-samples$SAMPLE
 apply(sample_flocklaoad,2, function(x) samples$SAMPLE[order(-x)[1:100]])%>%View
+
 sample_flocklaoad
 fa_A.sel$Y
 sample_meta_ofInterest=sample_meta%>%select(X.SampleID,empo_3)%>%rename(SAMPLE=X.SampleID)
@@ -157,6 +159,7 @@ fa_A.sel%>%
 ## Characterize sample's clusters (i.e. examine what kind of environments may have similar microbiome community pattern)
 ```{r, message=FALSE}
 library(dplyr)
+library(vsp)
 library(tidytext)
 #read in sample metadata
 #76 col
@@ -176,6 +179,7 @@ dim(sample_meta_mtx2)
 #characterize 
 feature= bff(fa_A.sel$Y, sample_meta_mtx,20)
 biome= bff(fa_A.sel$Y, sample_meta_mtx2,20)
+biome= bff(fa_center$Y, sample_meta_mtx2,20)
 #feature= bff(fa_A.sel$Y, meta_tt_mtx,10)
 feature
 biome
