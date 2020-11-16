@@ -1,0 +1,81 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r setup}
+library(Matrix)  # sparseMatrix()
+library(dplyr)
+library(vsp)
+```
+
+
+```{r}
+#read file and libraries
+infile = "otu_sample_value.txt"
+d = read.table(infile, header=T, sep="\t", colClasses=c(rep("character", 2), "numeric"))
+otus = read.table("row_metadata.txt", header=T, sep="\t", colClasses=rep("character", 9))
+samples= read.table("column_metadata.txt", header=T, sep="\t", colClasses=rep("character", 2))
+sample_meta.raw = read.csv("emp_qiime_mapping_qc_filtered.tsv",sep="\t")%>%rename(SAMPLE=X.SampleID)
+#left_join samples df with empo_3 for subsetting usage
+samples_empo<-samples%>%
+  left_join(sample_meta.raw%>%
+  select(c(SAMPLE,empo_3,ph)))%>%
+  filter(!is.na(ph))
+levels(sample_meta.raw$empo_3)
+#samples_empo%>%group_by(country)%>%summarize(count=n())
+#subset soil(non-saline) and Plant Rhizosphere sample sites
+selected.samples=rbind(
+  subset(samples_empo,samples_empo$empo_3=="Soil (non-saline)",ID),
+  subset(samples_empo,samples_empo$empo_3=="Plant rhizosphere",ID)
+)%>%mutate(id_num = (readr::parse_number(ID))+1)
+idx.soilplant=as.numeric(selected.samples$id_num)
+# extract row / column indices
+I = as.integer(gsub("otu_", "", d$OTU)) + 1        # add 1 to convert 0-index to 1-index
+J = as.integer(gsub("sample_", "", d$SAMPLE)) + 1  # add 1 to convert 0-index to 1-index
+```
+
+```{r}
+# sparse bipartitie OTU-sample adjacency matrix (w/o filtering)
+A = sparseMatrix(i=I, j=J, x=d$VALUE)
+rownames(A) = otus$ID
+colnames(A) = samples$ID
+dim(A)
+
+A.simple=(A > 0) * 1
+#index of OTUs with prevalence of at least 10 samples(use the rowSum of A.simple to pick)
+#since A.simple records 1 in Aij if otui appears in sample j; 0 otherwise
+idx.prv = rowSums(A.simple) > 9
+
+##here, just want to see if there's a difference aftering taking sqrt transformation
+#take sqrt transformation(stablization)
+#A.sqrt=A
+#A.sqrt@x=sqrt(A.sqrt@x)
+#plot(A@x)
+#plot(A.sqrt@x)
+
+#plot out-degree to examine
+hist(log10(rowSums(A)))#highly skewed, some microbiomes are more abundant than others
+```
+
+```{r}
+A.sel=A[idx.prv,idx.soilplant]
+dim(A.sel)
+#take square root transformation on A.sel (the adjmatrix of interest)
+A.sel@x=sqrt(A.sel@x)
+n=nrow(A.sel)
+d=ncol(A.sel)
+In<-as.matrix(c(rep(1,n)))
+Id<-as.matrix(c(rep(1,d)))
+length(A.sel@x)
+A.sel_center<-A.sel
+entries_len<-length(A.sel_center@x)
+A.sel_center@x<-A.sel_center@x-(In%*%(t(In)%*%A.sel/n))[1:entries_len]
+```
+
+```{r,message=FALSE}
+#fa_center<-vsp(A.sel_center,rank = 10,center=FALSE) #this works too
+fa_center<-vsp(A.sel,rank = 50,center = TRUE,scale = TRUE,rescale = TRUE,recenter = FALSE)
+plot_varimax_y_pairs(fa_center,1:10)
+screeplot(fa_center)
+```
+
