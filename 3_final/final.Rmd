@@ -6,6 +6,13 @@ output: html_notebook
 library(Matrix)  # sparseMatrix()
 library(dplyr)
 library(vsp)
+library(tidytext)
+library(ggplot2)
+library(wordspace)
+library(tidyverse)
+library(maps)
+library(ggthemes)
+library(lme4)
 ```
 
 
@@ -17,22 +24,45 @@ otus = read.table("row_metadata.txt", header=T, sep="\t", colClasses=rep("charac
 samples= read.table("column_metadata.txt", header=T, sep="\t", colClasses=rep("character", 2))
 sample_meta.raw = read.csv("emp_qiime_mapping_qc_filtered.tsv",sep="\t")%>%rename(SAMPLE=X.SampleID)
 #left_join samples df with empo_3 for subsetting usage
-samples_empo<-samples%>%
+selected.samples<-samples%>%
   left_join(sample_meta.raw%>%
-  select(c(SAMPLE,empo_3,ph)))%>%
-  filter(!is.na(ph))
-levels(sample_meta.raw$empo_3)
+  select(c(SAMPLE,empo_3,ph,collection_timestamp,latitude_deg,longitude_deg,env_biome,env_feature,envo_biome_0,envo_biome_1,envo_biome_2,envo_biome_3,envo_biome_4,adiv_observed_otus,adiv_chao1,adiv_shannon,adiv_faith_pd)))%>%
+  filter(empo_3%in%c("Soil (non-saline)","Plant rhizosphere"))%>%
+  filter(!is.na(ph))%>%
+  mutate(id_num=readr::parse_number(ID)+1)%>%
+  mutate_if(is.factor,as.character)
+selected.samples
+levels(as.factor(selected.samples$envo_biome_2))
 #samples_empo%>%group_by(country)%>%summarize(count=n())
 #subset soil(non-saline) and Plant Rhizosphere sample sites
-selected.samples=rbind(
-  subset(samples_empo,samples_empo$empo_3=="Soil (non-saline)",ID),
-  subset(samples_empo,samples_empo$empo_3=="Plant rhizosphere",ID)
-)%>%mutate(id_num = (readr::parse_number(ID))+1)
+# selected.samples=rbind(
+#   subset(samples_empo,samples_empo$empo_3=="Soil (non-saline)",ID),
+#   subset(samples_empo,samples_empo$empo_3=="Plant rhizosphere",ID)
+# )%>%mutate(id_num = (readr::parse_number(ID))+1)
 idx.soilplant=as.numeric(selected.samples$id_num)
+
 # extract row / column indices
 I = as.integer(gsub("otu_", "", d$OTU)) + 1        # add 1 to convert 0-index to 1-index
 J = as.integer(gsub("sample_", "", d$SAMPLE)) + 1  # add 1 to convert 0-index to 1-index
 ```
+## plot sample global location
+```{r}
+selected.samples
+```
+
+
+## plot overall trend of pH v.s. observed sequence diversity(1500 means that there are 1500 different kinds of sequences observed in the sample site)
+```{r}
+ph_alpha<-selected.samples%>%select(ph,adiv_observed_otus)
+ph_alpha_trend_overall<-ggplot(ph_alpha,aes(x=ph,y=adiv_observed_otus))+
+  geom_point()+
+  theme_bw()+
+  xlab("pH")+
+  ylab("observed sequences")
+ggsave("ph_alpha_trend_overall.jpg",ph_alpha_trend_overall)
+```
+
+
 
 ```{r}
 # sparse bipartitie OTU-sample adjacency matrix (w/o filtering)
@@ -59,9 +89,12 @@ hist(log10(rowSums(A)))#highly skewed, some microbiomes are more abundant than o
 
 ```{r}
 A.sel=A[idx.prv,idx.soilplant]
+colnames(A.sel)
 dim(A.sel)
+hist(log10(rowSums(A.sel)))
 #take square root transformation on A.sel (the adjmatrix of interest)
 A.sel@x=sqrt(A.sel@x)
+hist(log10(rowSums(A.sel)))
 n=nrow(A.sel)
 d=ncol(A.sel)
 In<-as.matrix(c(rep(1,n)))
@@ -70,12 +103,156 @@ length(A.sel@x)
 A.sel_center<-A.sel
 entries_len<-length(A.sel_center@x)
 A.sel_center@x<-A.sel_center@x-(In%*%(t(In)%*%A.sel/n))[1:entries_len]
+dim(A.sel_center)
 ```
 
 ```{r,message=FALSE}
 #fa_center<-vsp(A.sel_center,rank = 10,center=FALSE) #this works too
-fa_center<-vsp(A.sel,rank = 50,center = TRUE,scale = TRUE,rescale = TRUE,recenter = FALSE)
-plot_varimax_y_pairs(fa_center,1:10)
+#fa_center<-vsp(A.sel,rank = 6,center = TRUE,scale = TRUE,rescale = TRUE,recenter = FALSE)#takes forever to run
+
+#envo_biome2 has 6 biome labels for soil-related samples
+fa_center<-vsp(A.sel_center,rank = 6,center = FALSE)
+pairplot_y<-plot_varimax_y_pairs(fa_center_ph,1:6)
+ggsave(pairplot_y,filename = "pairplot_y.jpg")
+#fa_center$Y
 screeplot(fa_center)
 ```
+
+```{r}
+samples_selected_metaInterests<-selected.samples%>%
+  select(ID,env_biome,env_feature,ph)%>%
+  mutate_all(as.character)
+samples_selected_metaInterest1<-selected.samples%>%select(ID,env_biome)
+samples_selected_metaInterest2<-selected.samples%>%select(ID,env_feature)
+
+samples_selected_metaInterests_pivot<-pivot_longer(samples_selected_metaInterests,c(env_biome,env_feature,ph),"feature_type")
+
+samples_meta_mtx<-cast_sparse(samples_selected_metaInterest1,ID,env_biome)
+samples_meta_mtx2<-cast_sparse(samples_selected_metaInterest2,ID,env_feature)
+samples_meta_mtxall<-cast_sparse(samples_selected_metaInterests_pivot,ID,value)
+bffwith_biome<-bff(fa_center$Y,samples_meta_mtx,2)
+bffwith_feature<-bff(fa_center$Y,samples_meta_mtx2,3)
+bffwith_bfp<-bff(fa_center$Y,samples_meta_mtxall,15)
+bffwith_biome
+bffwith_feature
+bffwith_bfp
+#contextualize with biome, feature, ph
+bffwith_bfpdf<-data.frame(bffwith_bfp)
+write.csv(bffwith_bfp,file="bffwith_bfp.csv",row.names = FALSE)
+```
+## calculate the percentage of biome kind within each community
+```{r}
+phi=t(fa_center$Z)%*%A.sel_center
+dim(phi)#6*945
+phi@x
+
+norm_phi=rowNorms(phi,method="minkowski",p=1)#calculate l1 norm for each row
+norm_phi_d<-diag(norm_phi) #20*20 diagonal matrix
+norm_phi_d_inv<-solve(norm_phi_d) #inverse of norm_phi_d
+beta<-t(norm_phi_d_inv%*%phi) #2000*20
+beta[beta<0]=0
+beta<-apply(beta,2,function(x) return(x/sum(x)))
+#beta@x<-abs(beta@x) #take absolute value? nahhh, this is one way, but usually what we do is make the negative values = 0, and calculate x/sum(x), 'cause by assumption, we don't have negative betas, so, if we get negatvie ones, we'll just say it's statistical error
+colSums(beta)#each column sum up to 1
+beta
+hist(log10(beta))
+#how samples compose each community
+community_composition<-data.frame(beta)%>%rownames_to_column(var="ID")
+```
+## plot biome distribution within each community
+```{r}
+#left-join sample composition with feature of interest
+##by biome
+community_composition_bybiome<-samples_selected_metaInterest%>%
+  left_join(community_composition)%>%
+  select(-ID)%>%
+  group_by(env_biome)%>%
+  summarize_each(funs(sum))
+
+##by feature
+community_composition_byfeat<-samples_selected_metaInterest2%>%
+  left_join(community_composition)%>%
+  select(-ID)%>%
+  group_by(env_feature)%>%
+  summarize_each(funs(sum))
+
+community_composit_tidy<-community_composition_bybiome%>%
+  pivot_longer(!env_biome,names_to="cluster",values_to="ratio")%>%
+  mutate(ratio=100*ratio)%>%
+  mutate(env_biome=str_remove_all(env_biome,"biome"))%>%
+  mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))
+
+community_composit_tidy2<-community_composition_byfeat%>%
+  pivot_longer(!env_feature,names_to="cluster",values_to="ratio")%>%
+  mutate(ratio=100*ratio)%>%
+  mutate(env_feature=str_remove_all(env_feature,c("feature","habitat")))%>%
+  mutate(env_feature=str_replace_all(env_feature,"environmental","env."))%>%
+  mutate(env_feature=str_replace_all(env_feature,"anthropogenic","anthrop."))%>%
+  mutate(env_feature=str_replace_all(env_feature,"hydrothermal","hydro-thermal"))%>%
+  mutate(env_feature=str_replace_all(env_feature,"cultivated","culti-vated"))%>%
+  mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))
+
+p<-ggplot(community_composit_tidy[which(community_composit_tidy$ratio>9),], aes(x=env_biome,y=ratio)) +
+  geom_col() +
+  facet_wrap( ~ cluster, scales="free",ncol=3) +
+  theme_bw()+
+  aes(stringr::str_wrap(env_biome, 5), ratio)+xlab("biome type")+
+  theme(axis.text.x=element_text(size=rel(0.8)),axis.text.y = element_text(size=rel(0.8)))
+
+p
+
+p2<-ggplot(community_composit_tidy2[which(community_composit_tidy2$ratio>9),], aes(x=env_feature,y=ratio)) +
+  geom_col() +
+  facet_wrap( ~ cluster, scales="free",ncol=3) +
+  theme_bw()+
+  aes(stringr::str_wrap(env_feature, 3), ratio)+xlab("env feature")+
+  theme(axis.text.x=element_text(size=rel(1.0)),axis.text.y = element_text(size=rel(1.0)))
+p
+p2
+ggsave(p2,filename = "env_feature_weight.jpg")
+```
+## get memberships
+```{r}
+sample_membership<-fa_center%>%
+  get_varimax_y()%>%
+  select(-id)%>%
+  mutate_all(abs)%>%
+  apply(1,which.max)
+#add a column that says the sample's membership
+selected.samples<-selected.samples%>%mutate(cluster_mem=sample_membership)
+selected.samples
+```
+## within each cluster, pH v.s. diversity
+```{r}
+#use alpha diversity: phylum diversity
+selected.samples
+pdiv_bycluster<-selected.samples%>%select(ID,ph,cluster_mem,adiv_faith_pd)
+new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegatation (neutral)","5"="Dry cold","6"="Disturbed")
+p3<-ggplot(pdiv_bycluster,aes(x = ph,y=log10(adiv_faith_pd)))+
+  geom_point()+
+  facet_wrap(~cluster_mem,scales="free",labeller = labeller(cluster_mem=new_labels))+
+  theme_bw()+
+  xlab("pH")+ylab("phyla diversity")
+p3
+ggsave("ph_phydiv_bycluster.jpg",p3)
+
+fits=pdiv_bycluster%>%group_by(cluster_mem)%>%do(model=lm(ph~adiv_faith_pd,data=.))
+fits$model
+```
+## community membership globally
+```{r}
+global_membership<-selected.samples%>%select(latitude_deg,longitude_deg,cluster_mem)
+world <- ggplot() +
+  borders("world", colour = "gray85", fill = "gray80") +
+  theme_map() +
+  coord_cartesian(ylim = c(-50, 90)) 
+
+map <- world +
+  geom_point(aes(x = longitude_deg, y = latitude_deg, colour = factor(cluster_mem)),size=2,
+             data = global_membership) +
+  labs(colour = 'Cluster membership')
+map
+ggsave("membership_map.jpg",map)
+```
+
 
