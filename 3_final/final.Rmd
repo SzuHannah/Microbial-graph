@@ -1,3 +1,4 @@
+
 ---
 title: "R Notebook"
 output: html_notebook
@@ -12,7 +13,7 @@ library(wordspace)
 library(tidyverse)
 library(maps)
 library(ggthemes)
-library(lme4)
+library(broom)
 ```
 
 
@@ -116,6 +117,8 @@ pairplot_y<-plot_varimax_y_pairs(fa_center_ph,1:6)
 ggsave(pairplot_y,filename = "pairplot_y.jpg")
 #fa_center$Y
 screeplot(fa_center)
+plot_mixing_matrix(fa_center)
+dim(fa_center$Z)
 ```
 
 ```{r}
@@ -126,21 +129,29 @@ samples_selected_metaInterest1<-selected.samples%>%select(ID,env_biome)
 samples_selected_metaInterest2<-selected.samples%>%select(ID,env_feature)
 
 samples_selected_metaInterests_pivot<-pivot_longer(samples_selected_metaInterests,c(env_biome,env_feature,ph),"feature_type")
-
+samples_selected_metaInterest12_pivot<-pivot_longer(samples_selected_metaInterests,c(env_biome,env_feature),"feature_type")
 samples_meta_mtx<-cast_sparse(samples_selected_metaInterest1,ID,env_biome)
 samples_meta_mtx2<-cast_sparse(samples_selected_metaInterest2,ID,env_feature)
 samples_meta_mtxall<-cast_sparse(samples_selected_metaInterests_pivot,ID,value)
+samples_meta_mtx12<-cast_sparse(samples_selected_metaInterest12_pivot,ID,value)
+
 bffwith_biome<-bff(fa_center$Y,samples_meta_mtx,2)
 bffwith_feature<-bff(fa_center$Y,samples_meta_mtx2,3)
+#bff with biome, feature, ph
 bffwith_bfp<-bff(fa_center$Y,samples_meta_mtxall,15)
+#bff with biome,feature
+bffwith_bf<-bff(fa_center$Y,samples_meta_mtx12,10)
+bffwith_bf
 bffwith_biome
 bffwith_feature
 bffwith_bfp
 #contextualize with biome, feature, ph
-bffwith_bfpdf<-data.frame(bffwith_bfp)
+bffwith_bfpdf<-data.frame(bffwith_bfp) #dataframe version
 write.csv(bffwith_bfp,file="bffwith_bfp.csv",row.names = FALSE)
 ```
-## calculate the percentage of biome kind within each community
+
+
+## calculate the percentage of biome kind within each community 
 ```{r}
 phi=t(fa_center$Z)%*%A.sel_center
 dim(phi)#6*945
@@ -222,6 +233,19 @@ sample_membership<-fa_center%>%
 selected.samples<-selected.samples%>%mutate(cluster_mem=sample_membership)
 selected.samples
 ```
+## plot pH distribution of each cluster
+```{r}
+sample_phbycluster<-selected.samples%>%select(ID,ph,cluster_mem)
+ph_cluster<-ggplot(sample_phbycluster, aes(x=as.factor(cluster_mem), y=ph)) + 
+  geom_boxplot()+
+  xlab("cluster")+
+  scale_x_discrete(labels=c("weathered","cold moist","dry","short vegatation","dry cold","disturbed"))+
+  ylab("pH")+
+  theme_bw()
+ph_cluster
+```
+
+
 ## within each cluster, pH v.s. diversity
 ```{r}
 #use alpha diversity: phylum diversity
@@ -233,26 +257,244 @@ p3<-ggplot(pdiv_bycluster,aes(x = ph,y=log10(adiv_faith_pd)))+
   facet_wrap(~cluster_mem,scales="free",labeller = labeller(cluster_mem=new_labels))+
   theme_bw()+
   xlab("pH")+ylab("phyla diversity")
-p3
-ggsave("ph_phydiv_bycluster.jpg",p3)
+#fix x,y axis
+p4<-ggplot(pdiv_bycluster,aes(x = ph,y=adiv_faith_pd))+
+  geom_point()+
+  facet_wrap(~cluster_mem,labeller = labeller(cluster_mem=new_labels))+
+  theme_bw()+
+  xlab("pH")+ylab("phyla diversity")
+p4
+ggsave("ph_phydiv_bycluster.jpg",p4)
 
-fits=pdiv_bycluster%>%group_by(cluster_mem)%>%do(model=lm(ph~adiv_faith_pd,data=.))
-fits$model
+bycluster<-pdiv_bycluster%>%group_by(cluster_mem)
+do(bycluster, 
++    glance( 
++       lm(adiv_faith_pd~ph, data = .)))
+fits=pdiv_bycluster%>%group_by(cluster_mem)%>%do(model=lm(adiv_faith_pd~ph,data=.))
+lapply(fits$model, function(x)summary(x))
 ```
 ## community membership globally
 ```{r}
-global_membership<-selected.samples%>%select(latitude_deg,longitude_deg,cluster_mem)
+
 world <- ggplot() +
   borders("world", colour = "gray85", fill = "gray80") +
   theme_map() +
   coord_cartesian(ylim = c(-50, 90)) 
 
+membership_id<-c(1,2,3,4,5,6)
+membership_name<-c("1: Weathered (acidic)","2: Cold moist","3: Dry (basic)","4: Short vegatation (neutral)","5: Dry cold","6: Disturbed")
+membership_dic<-data.frame(cluster_mem=membership_id,membership_name)
+global_membership<-selected.samples%>%
+  select(latitude_deg,longitude_deg,cluster_mem)%>%
+  left_join(membership_dic)%>%
+  select(-cluster_mem)
+global_membership
 map <- world +
-  geom_point(aes(x = longitude_deg, y = latitude_deg, colour = factor(cluster_mem)),size=2,
+  geom_point(aes(x = longitude_deg, y = latitude_deg, colour = membership_name),size=2,
              data = global_membership) +
   labs(colour = 'Cluster membership')
 map
 ggsave("membership_map.jpg",map)
 ```
+## relate cluster to phyla composition  
+```{r}
+otus
+selected.otus_ID<-row.names(A.sel)
+dim(A.sel)
+selected.otus<-otus %>% filter(ID%in%selected.otus_ID)%>%select(ID,PHYLUM)
+selected.otus2<-otus %>% filter(ID%in%selected.otus_ID)%>%select(ID,GENUS)
+selected.otus_mtx<-cast_sparse(selected.otus,ID,PHYLUM)
+selected.otus_mtx2<-cast_sparse(selected.otus2,ID,GENUS)
+dim(selected.otus_mtx)
+bffwith_phyla<-bff(fa_center$Z,selected.otus_mtx,10)
+bffwith_genus<-bff(fa_center$Z,selected.otus_mtx2,10)
+bffwith_genus
+```
+
+## community composition by phyla
+```{r}
+phi=t(A.sel_center%*%fa_center$Y)
+dim(phi)#6*945
+phi@x
+
+norm_phi=rowNorms(phi,method="minkowski",p=1)#calculate l1 norm for each row
+norm_phi_d<-diag(norm_phi) #6*6 diagonal matrix
+norm_phi_d_inv<-solve(norm_phi_d) #inverse of norm_phi_d
+beta<-t(norm_phi_d_inv%*%phi) #6*6
+beta[beta<0]=0
+beta<-apply(beta,2,function(x) return(x/sum(x)))
+#beta@x<-abs(beta@x) #take absolute value? nahhh, this is one way, but usually what we do is make the negative values = 0, and calculate x/sum(x), 'cause by assumption, we don't have negative betas, so, if we get negatvie ones, we'll just say it's statistical error
+colSums(beta)#each column sum up to 1
+beta
+hist(log10(beta))
+#how otus compose each community
+community_composition_otu<-data.frame(beta)%>%rownames_to_column(var="ID")
+```
+
+## plot community composition by phyla
+```{r}
+##community composition by phyla
+community_composition_byphyla<-selected.otus%>%
+  left_join(community_composition_otu)%>%
+  select(-ID)%>%
+  group_by(PHYLUM)%>%
+  summarize_each(funs(sum))
+community_composition_byphyla
+community_composit_tidy_phyla<-community_composition_byphyla%>%
+  pivot_longer(!PHYLUM,names_to="cluster",values_to="ratio")%>%
+  mutate(ratio=100*ratio)%>%
+  mutate(PHYLUM=str_remove_all(PHYLUM,"p__"))%>%
+  mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))
+community_composit_tidy_phyla
+
+p5<-ggplot(community_composit_tidy_phyla[which(community_composit_tidy_phyla$ratio>8),], aes(x=PHYLUM,y=ratio)) +
+  geom_col() +
+  facet_wrap( ~ cluster, scales="free",ncol=3) +
+  theme_bw()+
+  aes(stringr::str_wrap(PHYLUM, 2), ratio)+xlab("phyla")+
+  theme(axis.text.x=element_text(size=rel(0.8)),axis.text.y = element_text(size=rel(0.8)))
+community_composit_tidy_phyla
+p5
+```
+## plot communtiy composition by genus
+```{r}
+## community composition by genus
+## filter out no-genus data
+community_composition_bygenus<-selected.otus2%>%
+  left_join(community_composition_otu)%>%
+  select(-ID)%>%
+  group_by(GENUS)%>%
+  summarize_each(funs(sum))%>%
+  filter(GENUS!="")%>%
+  filter(GENUS!="g__")
+community_composition_bygenus
+community_composit_tidy_genus<-community_composition_bygenus%>%
+  pivot_longer(!GENUS,names_to="cluster",values_to="ratio")%>%
+  mutate(ratio=100*ratio)%>%
+  mutate(GENUS=str_remove_all(GENUS,"g__"))%>%
+  mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))
+community_composit_tidy_genus
+
+p6<-ggplot(community_composit_tidy_genus[which(community_composit_tidy_genus$ratio>1),], aes(x=GENUS,y=ratio)) +
+  geom_col() +
+  facet_wrap( ~ cluster, scales="free",ncol=3) +
+  theme_bw()+
+  aes(stringr::str_wrap(GENUS, 2), ratio)+xlab("genus")+
+  theme(axis.text.x=element_text(size=rel(0.8)),axis.text.y = element_text(size=rel(0.8)))
+
+p6
+```
 
 
+
+## map otu to phyla for each sample
+```{r}
+# join otu-sample with phyla
+otuPhy<-otus%>%select(ID,PHYLUM)%>%mutate(PHYLUM=str_remove_all(PHYLUM,"p__"))%>%rename(OTU=ID)
+otuSamplePhy<-read.table(infile, header=T, sep="\t", colClasses=c(rep("character", 2), "numeric"))%>%
+  left_join(otuPhy)
+otuSamplePhy
+#for each sample site, sum the otu number of each phylum
+#each sample site has 5000 otus
+#exclude otus with unknown phylum
+perphylsumbysample<-otuSamplePhy%>%
+  group_by(SAMPLE,PHYLUM)%>%
+  summarize(amount=sum(VALUE))%>%
+  mutate(abundance=(amount/5000)*100)%>%
+  filter(PHYLUM!="")
+#sample-clustermembership
+sample_clustermem<-selected.samples%>%select(ID,cluster_mem)%>%rename(SAMPLE=ID)
+#selected samples that have memberships(we only included samples that have otu num>9, that's why some samples were not included)
+perphylsumbysample_withmem<-perphylsumbysample%>%
+  filter(SAMPLE%in%sample_clustermem$SAMPLE)%>%
+  left_join(sample_clustermem)%>%
+  rename(cluster=cluster_mem)
+perphylsumbysample_withmem
+#within each cluster, phyla that have more weight
+more_relatedphyla<-(community_composit_tidy_phyla[which(community_composit_tidy_phyla$ratio>8),])%>%
+  mutate_if(is.factor,as.character)%>%
+  mutate(cluster=str_remove_all(cluster,"X"))%>%
+  mutate(cluster=as.integer(cluster))
+more_relatedphyla
+perphylsumbysample_withmem
+#for each cluster, take the samples that have higher-weight-phyla in that cluster
+sample_ofrelatedphyla_bycluster<-perphylsumbysample_withmem%>%
+  left_join(more_relatedphyla,by=c("PHYLUM","cluster"))%>%
+  #if the ratio column is na, it means that the phylum-cluster key is not in the more_relatedphyla, 
+  #meaning that the phylum is not that important in the cluster; thus excluse
+  filter(!is.na(ratio))%>%
+  select(-ratio)
+sample_ofrelatedphyla_bycluster
+sample_ph<-selected.samples%>%select(ID,ph)%>%rename(SAMPLE=ID)
+#combine sample_ofrelatedphyla_bycluster with sample_ph
+sorpc_ph<-sample_ofrelatedphyla_bycluster%>%left_join(sample_ph)
+sorpc_ph
+```
+## plot ph by phyla composition
+```{r}
+new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegatation (neutral)","5"="Dry cold","6"="Disturbed")
+#facet grid is clearer than facet wrap
+p7<-ggplot(sorpc_ph,aes(x = ph,y=log(abundance)))+
+  geom_point()+
+  facet_grid(PHYLUM~cluster,scales="free_y",labeller = labeller(cluster=new_labels))+
+  theme_bw()+
+  xlab("pH")+ylab("phyla composition")
+p7
+
+```
+## map otu to genus for each sample
+```{r}
+# join otu-sample with genus
+otugen<-otus%>%select(ID,GENUS)%>%mutate(GENUS=str_remove_all(GENUS,"g__"))%>%rename(OTU=ID)
+otuSampleGen<-read.table(infile, header=T, sep="\t", colClasses=c(rep("character", 2), "numeric"))%>%
+  left_join(otugen)
+otuSampleGen
+#for each sample site, sum the otu number of each genus
+#each sample site has 5000 otus
+#exclude otus with unknown genus
+pergensumbysample<-otuSampleGen%>%
+  group_by(SAMPLE,GENUS)%>%
+  summarize(amount=sum(VALUE))%>%
+  mutate(abundance=(amount/5000)*100)%>%
+  filter(GENUS!="")
+#sample-clustermembership
+sample_clustermem<-selected.samples%>%select(ID,cluster_mem)%>%rename(SAMPLE=ID)
+#selected samples that have memberships(we only included samples that have otu num>9, that's why some samples were not included)
+pergensumbysample_withmem<-pergensumbysample%>%
+  filter(SAMPLE%in%sample_clustermem$SAMPLE)%>%
+  left_join(sample_clustermem)%>%
+  rename(cluster=cluster_mem)
+pergensumbysample_withmem
+#within each cluster, phyla that have more weight
+more_relatedgen<-(community_composit_tidy_genus[which(community_composit_tidy_genus$ratio>1),])%>%
+  mutate_if(is.factor,as.character)%>%
+  mutate(cluster=str_remove_all(cluster,"X"))%>%
+  mutate(cluster=as.integer(cluster))
+more_relatedgen
+pergenlsumbysample_withmem
+#for each cluster, take the samples that have higher-weight-phyla in that cluster
+sample_ofrelatedgen_bycluster<-pergensumbysample_withmem%>%
+  left_join(more_relatedgen,by=c("GENUS","cluster"))%>%
+  #if the ratio column is na, it means that the phylum-cluster key is not in the more_relatedgen, 
+  #meaning that the genus is not that important in the cluster; thus exclude
+  filter(!is.na(ratio))%>%
+  select(-ratio)
+sample_ofrelatedgen_bycluster
+sample_ph<-selected.samples%>%select(ID,ph)%>%rename(SAMPLE=ID)
+#combine sample_ofrelatedgen_bycluster with sample_ph
+sorgc_ph<-sample_ofrelatedgen_bycluster%>%left_join(sample_ph)
+sorgc_ph
+```
+## plot ph by genus composition
+```{r}
+new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegatation (neutral)","5"="Dry cold","6"="Disturbed")
+#facet grid is clearer than facet wrap
+p8<-ggplot(sorgc_ph,aes(x = ph,y=log(abundance)))+
+  geom_point()+
+  facet_grid(GENUS~cluster,scales="free_y",labeller = labeller(cluster=new_labels,GENUS=label_wrap_gen(5)))+
+  theme_bw()+
+  xlab("pH")+ylab("genus composition")+
+  theme(strip.text.x = element_text(8))
+p8
+
+```
