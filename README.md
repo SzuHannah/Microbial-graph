@@ -1,4 +1,7 @@
 # Microbial-graph project  
+## FAPROTAX workflow  
+[workflow document](4_faprotax/faprotax_workflow.md)  
+
 ## Proposal ppt  
 [onedrive link](https://uwprod-my.sharepoint.com/:p:/r/personal/ejdiaz3_wisc_edu/_layouts/15/Doc.aspx?sourcedoc=%7BC41C85AA-1C72-4A39-A686-F0EDFD090FF4%7D&file=Proposal%20Stats%20992.pptx&nav=eyJzSWQiOjI2NiwiY0lkIjozNzU2MDc0MTUsImNvbW1lbnRJZCI6bnVsbH0&action=edit&mobileredirect=true)  
 
