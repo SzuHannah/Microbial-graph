@@ -14,6 +14,7 @@ library(tidyverse)
 library(maps)
 library(ggthemes)
 library(broom)
+library(seqinr)
 ```
 
 
@@ -117,8 +118,10 @@ pairplot_y<-plot_varimax_y_pairs(fa_center_ph,1:6)
 ggsave(pairplot_y,filename = "pairplot_y.jpg")
 #fa_center$Y
 screeplot(fa_center)
-plot_mixing_matrix(fa_center)
+bmtx<-plot_mixing_matrix(fa_center)
 dim(fa_center$Z)
+dim(A.sel_center)
+ggsave(bmtx,filename = "bmatrix.jpg")
 ```
 
 ```{r}
@@ -202,16 +205,16 @@ community_composit_tidy2<-community_composition_byfeat%>%
   mutate(env_feature=str_replace_all(env_feature,"hydrothermal","hydro-thermal"))%>%
   mutate(env_feature=str_replace_all(env_feature,"cultivated","culti-vated"))%>%
   mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))
-
+new_labels<-c("X1"="Weathered","X2"="Cold moist","X3"="Dry","X4"="Short vegetation","X5"="Cold dry","X6"="Disturbed")
 p<-ggplot(community_composit_tidy[which(community_composit_tidy$ratio>9),], aes(x=env_biome,y=ratio)) +
   geom_col() +
-  facet_wrap( ~ cluster, scales="free",ncol=3) +
+  facet_wrap( ~ cluster, scales="free",ncol=3,labeller=labeller(cluster=new_labels)) +
   theme_bw()+
   aes(stringr::str_wrap(env_biome, 5), ratio)+xlab("biome type")+
   theme(axis.text.x=element_text(size=rel(0.8)),axis.text.y = element_text(size=rel(0.8)))
 
 p
-
+ggsave(p,filename = "env_biome_weight.jpg")
 p2<-ggplot(community_composit_tidy2[which(community_composit_tidy2$ratio>9),], aes(x=env_feature,y=ratio)) +
   geom_col() +
   facet_wrap( ~ cluster, scales="free",ncol=3) +
@@ -251,7 +254,7 @@ ph_cluster
 #use alpha diversity: phylum diversity
 selected.samples
 pdiv_bycluster<-selected.samples%>%select(ID,ph,cluster_mem,adiv_faith_pd)
-new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegatation (neutral)","5"="Dry cold","6"="Disturbed")
+new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegetation (neutral)","5"="Dry cold","6"="Disturbed")
 p3<-ggplot(pdiv_bycluster,aes(x = ph,y=log10(adiv_faith_pd)))+
   geom_point()+
   facet_wrap(~cluster_mem,scales="free",labeller = labeller(cluster_mem=new_labels))+
@@ -296,22 +299,35 @@ map <- world +
 map
 ggsave("membership_map.jpg",map)
 ```
-## relate cluster to phyla composition  
+## relate cluster to phyla/genus/function composition  
 ```{r}
 otus
 selected.otus_ID<-row.names(A.sel)
 dim(A.sel)
 selected.otus<-otus %>% filter(ID%in%selected.otus_ID)%>%select(ID,PHYLUM)
 selected.otus2<-otus %>% filter(ID%in%selected.otus_ID)%>%select(ID,GENUS)
+selected.otus3<-otus %>% filter(ID%in%selected.otus_ID)%>%select(ID)%>%left_join(taxfunc)
+selected.otus3
 selected.otus_mtx<-cast_sparse(selected.otus,ID,PHYLUM)
 selected.otus_mtx2<-cast_sparse(selected.otus2,ID,GENUS)
+selected.otus_mtx3<-cast_sparse(selected.otus3,ID,func)
+
 dim(selected.otus_mtx)
+dim(selected.otus_mtx3)
+
 bffwith_phyla<-bff(fa_center$Z,selected.otus_mtx,10)
 bffwith_genus<-bff(fa_center$Z,selected.otus_mtx2,10)
+bffwith_func<-bff(fa_center$Z,selected.otus_mtx3,10)
+
+bffwith_phyla
 bffwith_genus
+bffwith_func
+
+bfffuncdf<-data.frame(bffwith_func)
+write.csv(bfffuncdf,"bffwithfunction.csv",row.names = FALSE)
 ```
 
-## community composition by phyla
+## community composition by phyla 
 ```{r}
 phi=t(A.sel_center%*%fa_center$Y)
 dim(phi)#6*945
@@ -331,8 +347,9 @@ hist(log10(beta))
 community_composition_otu<-data.frame(beta)%>%rownames_to_column(var="ID")
 ```
 
-## plot community composition by phyla
+## plot community composition by phyla(highlight the ones that are top prominant in the cluster)
 ```{r}
+new_labels<-c("X1"="Weathered","X2"="Cold moist","X3"="Dry","X4"="Short\nvegetation","X5"="Cold dry","X6"="Disturbed")
 ##community composition by phyla
 community_composition_byphyla<-selected.otus%>%
   left_join(community_composition_otu)%>%
@@ -340,21 +357,38 @@ community_composition_byphyla<-selected.otus%>%
   group_by(PHYLUM)%>%
   summarize_each(funs(sum))
 community_composition_byphyla
+#add a column to highligh more related phyla for each cluster
 community_composit_tidy_phyla<-community_composition_byphyla%>%
   pivot_longer(!PHYLUM,names_to="cluster",values_to="ratio")%>%
   mutate(ratio=100*ratio)%>%
   mutate(PHYLUM=str_remove_all(PHYLUM,"p__"))%>%
-  mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))
+  mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))%>%
+  mutate(highlight=ifelse(ratio>8,"yes","no"))
 community_composit_tidy_phyla
+#prominant phyla within a community
+ppwc<-community_composit_tidy_phyla[which(community_composit_tidy_phyla$ratio>8),]$PHYLUM
+ppwclevel<-levels(as.factor(ppwc))
+ppwclevel
 
 p5<-ggplot(community_composit_tidy_phyla[which(community_composit_tidy_phyla$ratio>8),], aes(x=PHYLUM,y=ratio)) +
   geom_col() +
-  facet_wrap( ~ cluster, scales="free",ncol=3) +
+  facet_wrap( ~ cluster, scales="free",ncol=3,labeller = labeller(cluster=new_labels)) +
   theme_bw()+
   aes(stringr::str_wrap(PHYLUM, 2), ratio)+xlab("phyla")+
   theme(axis.text.x=element_text(size=rel(0.8)),axis.text.y = element_text(size=rel(0.8)))
+#adjust the plot to show same phyla in each cluster
+p5.1<-ggplot(community_composit_tidy_phyla[which(community_composit_tidy_phyla$PHYLUM%in%ppwclevel),], aes(x=PHYLUM,y=ratio,fill=highlight)) +
+  geom_col() +
+  facet_wrap( ~ cluster,ncol=2,labeller = labeller(cluster=new_labels)) +
+  theme_bw()+
+  scale_fill_manual(values = c("yes"="tomato","no"="gray"),guide=FALSE)+
+  aes(stringr::str_wrap(PHYLUM, 2), ratio)+xlab("phyla")+
+  theme(axis.text.x=element_text(size=rel(1.5)),axis.text.y = element_text(size=rel(0.8)), strip.text.x = element_text(size = rel(1.5)))
+
 community_composit_tidy_phyla
 p5
+p5.1
+ggsave("phyla_composit.jpg",p5.1,width=1920/100,height=1080/100,dpi=600)
 ```
 ## plot communtiy composition by genus
 ```{r}
@@ -415,6 +449,10 @@ more_relatedphyla<-(community_composit_tidy_phyla[which(community_composit_tidy_
   mutate_if(is.factor,as.character)%>%
   mutate(cluster=str_remove_all(cluster,"X"))%>%
   mutate(cluster=as.integer(cluster))
+# more_relatedphyla<-(community_composit_tidy_phyla[which(community_composit_tidy_phyla$PHYLUM%in%ppwclevel),])%>%
+#   mutate_if(is.factor,as.character)%>%
+#   mutate(cluster=str_remove_all(cluster,"X"))%>%
+#   mutate(cluster=as.integer(cluster))
 more_relatedphyla
 perphylsumbysample_withmem
 #for each cluster, take the samples that have higher-weight-phyla in that cluster
@@ -425,22 +463,29 @@ sample_ofrelatedphyla_bycluster<-perphylsumbysample_withmem%>%
   filter(!is.na(ratio))%>%
   select(-ratio)
 sample_ofrelatedphyla_bycluster
-sample_ph<-selected.samples%>%select(ID,ph)%>%rename(SAMPLE=ID)
+sample_ph<-selected.samples%>%select(ID,ph,envo_biome_2)%>%rename(SAMPLE=ID)
 #combine sample_ofrelatedphyla_bycluster with sample_ph
 sorpc_ph<-sample_ofrelatedphyla_bycluster%>%left_join(sample_ph)
 sorpc_ph
 ```
 ## plot ph by phyla composition
 ```{r}
-new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegatation (neutral)","5"="Dry cold","6"="Disturbed")
+new_labels<-c("1"="Weathered","2"="Cold moist","3"="Dry","4"="Short\nvegetation","5"="Cold dry","6"="Disturbed")
 #facet grid is clearer than facet wrap
-p7<-ggplot(sorpc_ph,aes(x = ph,y=log(abundance)))+
+p7<-ggplot(sorpc_ph,aes(x = ph,y=log(abundance),color=envo_biome_2))+
   geom_point()+
-  facet_grid(PHYLUM~cluster,scales="free_y",labeller = labeller(cluster=new_labels))+
+  facet_grid(cluster~PHYLUM,labeller = labeller(cluster=new_labels))+
   theme_bw()+
-  xlab("pH")+ylab("phyla composition")
+  xlab("pH")+ylab("log(phyla abundance)")+
+  theme(strip.text.x = element_text(size = 14,colour = "black"),
+        strip.text.y = element_text(size=14),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        axis.text=element_text(size=12,colour = "black"),
+        axis.title=element_text(size=15,colour = "black"),
+        legend.position = "none")
 p7
-
+ggsave("ph-phyla.jpg",p7,width=1920/100,height=1080/100,dpi=600)
 ```
 ## map otu to genus for each sample
 ```{r}
@@ -480,21 +525,208 @@ sample_ofrelatedgen_bycluster<-pergensumbysample_withmem%>%
   filter(!is.na(ratio))%>%
   select(-ratio)
 sample_ofrelatedgen_bycluster
-sample_ph<-selected.samples%>%select(ID,ph)%>%rename(SAMPLE=ID)
+sample_ph<-selected.samples%>%select(ID,ph,envo_biome_2)%>%rename(SAMPLE=ID)
 #combine sample_ofrelatedgen_bycluster with sample_ph
 sorgc_ph<-sample_ofrelatedgen_bycluster%>%left_join(sample_ph)
 sorgc_ph
 ```
 ## plot ph by genus composition
 ```{r}
-new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegatation (neutral)","5"="Dry cold","6"="Disturbed")
+new_labels<-c("1"="Weathered (acidic)","2"="Cold moist","3"="Dry (basic)","4"="Short vegatation\n(neutral)","5"="Dry cold","6"="Disturbed")
 #facet grid is clearer than facet wrap
-p8<-ggplot(sorgc_ph,aes(x = ph,y=log(abundance)))+
+#take log for abundance to see clearer at the trend
+p8<-ggplot(sorgc_ph,aes(x = ph,y=log(abundance),color=envo_biome_2))+
   geom_point()+
-  facet_grid(GENUS~cluster,scales="free_y",labeller = labeller(cluster=new_labels,GENUS=label_wrap_gen(5)))+
+  facet_grid(cluster~GENUS,scales="free",labeller = labeller(cluster=new_labels,GENUS=label_wrap_gen(5)))+
   theme_bw()+
   xlab("pH")+ylab("genus composition")+
   theme(strip.text.x = element_text(8))
 p8
 
 ```
+## infer function of biomes
+```{r}
+otu_tax<-otus%>%
+  select(-SEQUENCE)%>%
+  mutate_all(na_if,"")%>%
+  filter(!is.na(GENUS))%>%filter(GENUS!="g__")
+otu_tax
+tax<-unite(otu_tax,taxonomy,-1,sep = "; ",na.rm = TRUE)
+tax
+tax$taxonomy<-str_replace_all(tax$taxonomy,"\\[|\\]", "")
+write.table(tax, file='otu_tax.tsv', quote=FALSE, sep='\t',row.names = FALSE)
+tax<-tax%>%rename('seq'='taxonomy')
+
+seq.func<-read_csv("seq_func.csv")%>%rename('func'='function')%>%rename('seq'='sequence')
+seq.func
+tax
+taxfunc<-tax%>%left_join(seq.func)%>%select(ID,func)%>%distinct(ID,.keep_all=TRUE)
+#map function with taxonomy path
+taxfunc$func<-str_replace_all(taxfunc$func, '_', ' ')
+long_func<-("methanogenesis by CO2 reduction with H2")
+long_func2<-("aerobic chemoheterotrophy")
+long_func3<-("photosynthetic cyanobacteria")
+long_func4<-("fermentation")
+taxfunc$func<-str_replace_all(taxfunc$func,long_func,"methano- genesis by CO2")
+taxfunc$func<-str_replace_all(taxfunc$func,long_func2,"aerobic chemo- heterotrophy")
+taxfunc$func<-str_replace_all(taxfunc$func,long_func3,"photo- synthetic cyanobacteria")
+taxfunc$func<-str_replace_all(taxfunc$func,long_func4,"fermen- tation")
+taxfunc
+```
+## plot community composition by function
+```{r}
+## community composition by fimctopm
+## filter out no-genus data
+community_composition_byfunc<-selected.otus3%>%
+  left_join(community_composition_otu)%>%
+  select(-ID)%>%
+  group_by(func)%>%
+  summarize_each(funs(sum))%>%
+  filter(!is.na(func))
+community_composition_byfunc
+#add a column to highlight more prominant function
+community_composit_tidy_func<-community_composition_byfunc%>%
+  pivot_longer(!func,names_to="cluster",values_to="ratio")%>%
+  mutate(ratio=100*ratio)%>%
+  mutate(cluster=factor(cluster,levels=paste0("X",c(1:6))))%>%
+  mutate(highlight=ifelse(ratio>0.5,"yes","no"))
+community_composit_tidy_func
+#prominent function within a cluster
+pfwc<-community_composit_tidy_func[which(community_composit_tidy_func$ratio>0.55),]$func
+pfwclevel<-levels(as.factor(pfwc))
+pfwclevel
+new_labels<-c("X1"="Weathered","X2"="Cold moist","X3"="Dry","X4"="Short vegetation","X5"="Cold dry","X6"="Disturbed")
+p9<-ggplot(community_composit_tidy_func[which(community_composit_tidy_func$ratio>0.55),], aes(x=func,y=ratio)) +
+  geom_col() +
+  facet_wrap( ~ cluster, scales="free",ncol=3,labeller = labeller(cluster=new_labels)) +
+  theme_bw()+
+  aes(stringr::str_wrap(func, 2), ratio)+xlab("function")+
+  theme(axis.text.x=element_text(size=rel(1.1)),axis.text.y = element_text(size=rel(0.8)))
+
+p9.1<-ggplot(community_composit_tidy_func[community_composit_tidy_func$func%in%pfwclevel,], 
+             aes(x=func,y=ratio,fill=highlight)) +
+  geom_col() +
+  facet_wrap( ~cluster,nrow=3,labeller = labeller(cluster=new_labels)) +
+  theme_bw()+
+  scale_fill_manual(values=c("yes"="tomato","no"="gray"),guide=FALSE)+
+  aes(stringr::str_wrap(func, 2), ratio)+xlab("function")+
+  theme(axis.text.x=element_text(size=rel(1.1)),axis.text.y = element_text(size=rel(0.8)))
+p9
+p9.1
+ggsave("function ratio-cluster.jpg",p9.1,width = 1920/100, height=1080/100,dpi=600)
+```
+## map otu to function for each sample
+```{r}
+# join otu-sample with function
+otufunc<-otus%>%select(ID)%>%left_join(taxfunc)%>%rename(OTU=ID)
+otuSampleFunc<-read.table(infile, header=T, sep="\t", colClasses=c(rep("character", 2), "numeric"))%>%
+  left_join(otufunc)
+otuSampleFunc
+#for each sample site, sum the otu number of each genus
+#each sample site has 5000 otus
+#exclude otus with unknown genus
+perfuncsumbysample<-otuSampleFunc%>%
+  group_by(SAMPLE,func)%>%
+  summarize(amount=sum(VALUE))%>%
+  mutate(abundance=(amount/5000)*100)%>%
+  filter(!is.na(func))
+#sample-clustermembership
+sample_clustermem<-selected.samples%>%select(ID,cluster_mem)%>%rename(SAMPLE=ID)
+#selected samples that have memberships(we only included samples that have otu num>9, that's why some samples were not included)
+perfuncsumbysample_withmem<-perfuncsumbysample%>%
+  filter(SAMPLE%in%sample_clustermem$SAMPLE)%>%
+  left_join(sample_clustermem)%>%
+  rename(cluster=cluster_mem)
+perfuncsumbysample_withmem
+#within each cluster, phyla that have more weight
+more_relatedfunc<-(community_composit_tidy_func[which(community_composit_tidy_func$ratio>0.55),])%>%
+  mutate_if(is.factor,as.character)%>%
+  mutate(cluster=str_remove_all(cluster,"X"))%>%
+  mutate(cluster=as.integer(cluster))
+more_relatedfunc
+perfuncsumbysample_withmem
+#for each cluster, take the samples that have higher-weight-phyla in that cluster
+sample_ofrelatedfunc_bycluster<-perfuncsumbysample_withmem%>%
+  left_join(more_relatedfunc,by=c("func","cluster"))%>%
+  #if the ratio column is na, it means that the phylum-cluster key is not in the more_relatedgen, 
+  #meaning that the genus is not that important in the cluster; thus exclude
+  filter(!is.na(ratio))%>%
+  select(-ratio)
+sample_ofrelatedfunc_bycluster
+sample_ph<-selected.samples%>%select(ID,ph,envo_biome_2)%>%rename(SAMPLE=ID)
+#combine sample_ofrelatedgen_bycluster with sample_ph
+sorfc_ph<-sample_ofrelatedfunc_bycluster%>%left_join(sample_ph)
+sorfc_ph
+```
+## plot ph by function composition
+```{r}
+new_labels<-c("1"="Weathered","2"="Cold moist","3"="Dry","4"="Short\nvegetation","5"="Cold dry","6"="Disturbed")
+#facet grid is clearer than facet wrap
+#take log for abundance to see clearer at the trend
+p10<-ggplot(sorfc_ph,aes(x = ph,y=log10(abundance),color=envo_biome_2))+
+  geom_point()+
+  facet_grid(cluster~func,labeller = labeller(cluster=new_labels,func=label_wrap_gen(5)))+
+  theme_bw()+
+  xlab("pH")+ylab("log(function abundance)")+
+  theme(strip.text= element_text(size=14),legend.position = "none")
+p10
+#ggplot default: dpi=30, height and width specified in 'in', ref: https://ggplot2.tidyverse.org/reference/ggsave.html#examples
+#ref: 
+ggsave("ph-function.jpg",p10,width=1920/100,height=1080/100,dpi=600)
+```
+
+## regression-function
+```{r}
+## function
+sorfc_ph_reg<-sorfc_ph%>%mutate(logabundance=log10(abundance))%>%select(logabundance,cluster,func,ph)
+sorfc_ph_reg
+fit.func<-sorfc_ph_reg%>%group_by(cluster,func)%>%do(model=lm(logabundance~ph,data=.))
+
+fit.funcdf<-lapply(fit.func$model,function(x){
+  tidy(x)
+})
+#pvalues
+pls<-lapply(fit.func$model,function(x){
+  p<-tidy(x)[2,]$p.value
+  return(p)
+})%>%unlist
+pls
+estimatels<-lapply(fit.func$model, function(x){
+  est<-tidy(x)[2,]$estimate
+})%>%unlistls
+lmsum.func<-data.frame(cbind(pls,estimatels))
+fit.func.summ<-cbind(fit.func,lmsum.func)%>%rename(pval=pls,estimate=estimatels)%>%select(-model)
+write_csv(fit.func.summ,file = "function_cluster_lmsum.csv")
+#efficients that are significant
+fit.func.sig<-fit.func.summ%>%filter(pval<0.05)
+```
+## regression-phyla
+```{r}
+## phyla
+sorpc_ph
+
+sorpc_ph_reg<-sorpc_ph%>%mutate(logabundance=log10(abundance))%>%select(logabundance,cluster,PHYLUM,ph)
+sorpc_ph_reg
+fit.func.phy<-sorpc_ph_reg%>%group_by(cluster,PHYLUM)%>%do(model=lm(logabundance~ph,data=.))
+
+fit.funcdf.phy<-lapply(fit.func.phy$model,function(x){
+  tidy(x)
+})
+fit.funcdf.phy
+#pvalues
+pls.phy<-lapply(fit.func.phy$model,function(x){
+  p<-tidy(x)[2,]$p.value
+  return(p)
+})%>%unlist
+pls.phy
+estimatels.phy<-lapply(fit.func.phy$model, function(x){
+  est<-tidy(x)[2,]$estimate
+})%>%unlist
+lmsum.func.phy<-data.frame(cbind(pls.phy,estimatels.phy))
+fit.func.summ.phy<-cbind(fit.func.phy,lmsum.func.phy)%>%rename(pval=pls.phy,estimate=estimatels.phy)%>%select(-model)
+write_csv(fit.func.summ.phy,file = "phyla_cluster_lmsum.csv")
+#efficients that are significant
+fit.func.sig.phy<-fit.func.summ.phy%>%filter(pval<0.05)
+fit.func.sig.phy
+```
+
