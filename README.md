@@ -1,6 +1,6 @@
 # Microbial-graph project  
 ## Full Documentation  
-[Documentatino](https://szuhannah.github.io/Microbial-graph/docs/Microbial_Report.pdf)  
+[Documentation](https://szuhannah.github.io/Microbial-graph/docs/Microbial_Report.pdf)  
 
 ## FAPROTAX workflow  
 [workflow document](4_faprotax/faprotax_workflow.md)  
