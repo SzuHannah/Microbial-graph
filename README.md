@@ -2,8 +2,7 @@
 ## FAPROTAX workflow  
 [workflow document](4_faprotax/faprotax_workflow.md)  
 
-## Useful links  
-ref:  
+## References  
 [emp repo](https://github.com/biocore/emp)  
 [emp repo_cooccurence](https://github.com/biocore/emp/tree/master/code/08-cooccurrence-nestedness/cooccurrence-network)  
 [emp_sample metadata](https://github.com/biocore/emp/blob/master/data/mapping-files/emp_qiime_mapping_subset_2k.tsv)  
